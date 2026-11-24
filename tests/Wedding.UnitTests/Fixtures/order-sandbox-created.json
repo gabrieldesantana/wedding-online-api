@@ -1,0 +1,17 @@
+﻿{
+    "id":  "ORDTST_SANITIZED_FIXTURE",
+    "type":  "online",
+    "processing_mode":  "manual",
+    "capture_mode":  "automatic_async",
+    "status":  "created",
+    "total_amount":  "10.00",
+    "country_code":  "BRA",
+    "currency":  "BRL",
+    "created_date":  "2026-11-24T01:49:20.559Z",
+    "last_updated_date":  "2026-11-24T01:49:20.559Z",
+    "external_reference":  "00000000-0000-0000-0000-000000000001",
+    "user_id":  "receiver",
+    "integration_data":  {
+                             "application_id":  "app"
+                         }
+}

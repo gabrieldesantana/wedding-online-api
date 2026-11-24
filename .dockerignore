@@ -1,0 +1,10 @@
+.dotnet
+.git
+**/bin
+**/obj
+tests
+**/*.pfx
+.env
+.local
+**/appsettings.Development.Local.json
+TestResults

@@ -1,0 +1,19 @@
+{
+  "id": "ORDTST01KS5AJ6HTK2HRQ3XJ3C2JCKP9",
+  "type": "online",
+  "processing_mode": "manual",
+  "status": "created",
+  "status_detail": "created",
+  "capture_mode": "automatic_async",
+  "external_reference": "00000000-0000-0000-0000-000000000001",
+  "total_amount": "150.00",
+  "total_paid_amount": "0.00",
+  "checkout_url": "https://www.mercadopago.com.br/checkout/v1/redirect?order_id=ORDTST01KS5AJ6HTK2HRQ3XJ3C2JCKP9",
+  "expiration_time": "P1D",
+  "country_code": "BRA",
+  "user_id": "receiver",
+  "currency": "BRL",
+  "created_date": "2026-05-21T13:10:56.845Z",
+  "last_updated_date": "2026-05-21T13:10:56.845Z",
+  "integration_data": { "application_id": "app" }
+}

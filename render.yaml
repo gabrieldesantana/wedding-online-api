@@ -1,0 +1,31 @@
+envVarGroups:
+  - name: wedding-shared
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: DataProtection__ApplicationName
+        value: WeddingGifts
+      - key: Authentication__CookieSameSite
+        value: Lax
+      - key: MercadoPago__CheckoutEnabled
+        value: "false"
+services:
+  - type: web
+    name: wedding-api
+    runtime: docker
+    plan: starter
+    region: virginia
+    healthCheckPath: /health/ready
+    preDeployCommand: dotnet Wedding.Api.dll db migrate
+    autoDeployTrigger: off
+    envVars:
+      - fromGroup: wedding-shared
+  - type: cron
+    name: wedding-reconcile
+    runtime: docker
+    region: virginia
+    schedule: "*/5 * * * *"
+    dockerCommand: dotnet Wedding.Api.dll jobs reconcile
+    autoDeployTrigger: off
+    envVars:
+      - fromGroup: wedding-shared
