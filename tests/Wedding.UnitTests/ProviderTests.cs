@@ -11,6 +11,24 @@ namespace Wedding.UnitTests;
 
 public sealed class ProviderTests
 {
+    [Fact] public async Task SandboxApprovalUsesOrdersWithoutLegacyFinancialProjection()
+    {
+        var node = JsonNode.Parse(Fixture("order-sandbox-created.json"))!;
+        node["status"] = "processed"; node["status_detail"] = "accredited"; node["total_paid_amount"] = "10.00";
+        node["transactions"] = JsonNode.Parse("{\"payments\":[{\"reference_id\":\"123456\"}]}");
+        var handler = new StubHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            Assert.DoesNotContain("/payments/", path);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(path == "/users/me"
+                ? "{\"id\":\"receiver\",\"tags\":[\"test_user\"]}" : node.ToJsonString()) };
+        });
+        var client = new MercadoPagoClient(new HttpClient(handler) { BaseAddress = new Uri("https://api.mercadopago.com/") },
+            Options.Create(new MercadoPagoOptions { Environment = "test", ReceiverId = "receiver" }), NullLogger<MercadoPagoClient>.Instance);
+        var order = await client.GetOrderAsync("ORDTST_SANITIZED_FIXTURE", CancellationToken.None);
+        Assert.False(order.LiveMode); Assert.Equal("approved", Rules.MapStatus(order.Status, order.StatusDetail, order.RefundedAmountCents));
+        Assert.Null(order.NetAmountCents); Assert.Null(order.FeeAmountCents);
+    }
     [Fact] public async Task SingleAttemptSandboxRejectsARealAccountBeforeCreatingAnOrder()
     {
         var posts = 0;
@@ -66,7 +84,7 @@ public sealed class ProviderTests
             Assert.Equal(key.ToString(), request.Headers.GetValues("X-Idempotency-Key").Single()); Assert.Equal("Bearer", request.Headers.Authorization!.Scheme);
             return new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("provider-private-error-with-guest-data") };
         });
-        var client = new MercadoPagoClient(new HttpClient(handler) { BaseAddress = new Uri("https://api.mercadopago.com/") }, Options.Create(new MercadoPagoOptions { AccessToken = "test-only" }), NullLogger<MercadoPagoClient>.Instance);
+        var client = new MercadoPagoClient(new HttpClient(handler) { BaseAddress = new Uri("https://api.mercadopago.com/") }, Options.Create(new MercadoPagoOptions { AccessToken = "test-only", Environment = "production" }), NullLogger<MercadoPagoClient>.Instance);
         var error = await Assert.ThrowsAsync<ApiException>(() => client.CreateOrderAsync("{}", key, CancellationToken.None));
         Assert.Equal("provider_creation_failed", error.Code); Assert.DoesNotContain("guest", error.Message);
     }

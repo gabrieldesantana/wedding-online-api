@@ -91,7 +91,22 @@ The parser follows the documented [Orders get response](https://www.mercadopago.
 
 Webhook authentication follows the [official notification flow](https://www.mercadopago.com.br/developers/pt/docs/checkout-pro-orders/notifications?scope=prod) and [official .NET signature canonicalization](https://github.com/mercadopago/sdk-dotnet/blob/master/src/MercadoPago/Webhook/WebhookSignatureValidator.cs). Signed identifiers retain their case. A valid notification is persisted before 200; only an authoritative provider query changes financial state. Unsupported authenticated topics are retained as ignored; add separately validated adapters if the account requires additional refund/chargeback topics.
 
-For initial local testing only, `MercadoPago__SandboxSingleAttempt=true` permits checkout without a retention guarantee in Development/Testing with the test environment. The adapter verifies that the credential belongs to a test account before creating an order. Creation is attempted once; uncertainty requires manual intervention and never triggers another creation request. This option cannot enable production checkout. Use one installment for the initial card test; Pix and payer-funded installments still require separate acceptance.
+`MercadoPago__SandboxSingleAttempt=true` permits checkout without a retention guarantee when `MercadoPago__Environment=test`, including on Render with `ASPNETCORE_ENVIRONMENT=Production`. Hosting and payment environments are independent. The adapter verifies that the credential belongs to the configured test account before creating an order. Creation is attempted once; uncertainty requires manual intervention and never triggers another creation request. This option cannot enable live payments. Use one installment for the initial card test; Pix and payer-funded installments still require separate acceptance. Sandbox Orders status is authoritative after account/reference/amount verification; legacy Payments financial projections are not queried in sandbox because observed metadata uses incompatible environment and order identifiers. Missing fee/net values remain unknown.
+
+For a hosted sandbox, keep the production certificate, HTTPS, CORS, and database settings and set:
+
+```dotenv
+ASPNETCORE_ENVIRONMENT=Production
+MercadoPago__Environment=test
+MercadoPago__CheckoutEnabled=true
+MercadoPago__SandboxSingleAttempt=true
+MercadoPago__IdempotencyWindowMinutes=0
+MercadoPago__ValidatedConfigJson={"payment_method":{"not_allowed_types":["ticket"],"max_installments":1}}
+```
+
+Supply test account credentials and configure the test dashboard webhook to the deployed `/api/webhooks/mercadopago` endpoint. An uncertain creation is blocked; do not bypass it by creating a fresh contribution until the existing provider outcome has been investigated. On Render Free, the worker stops while the service sleeps; delayed notifications and polling must be tested, and reconciliation needs a separate scheduled runner.
+
+After sandbox acceptance, live activation uses environment values: disable checkout while configuring `Environment=production`, `SandboxSingleAttempt=false`, production access token/signature/receiver/application, production dashboard webhook, accepted payment config, and a verified positive idempotency retention window. Use a separate Neon database/branch and matching migrations/couple provisioning so test contributions never enter live totals. Keep the production Data Protection certificate backed up and consistent across workers. Do not claim live readiness until production financial projections, installments, refunds and chargebacks pass acceptance.
 
 With local credentials, webhook configuration, and this sandbox mode configured, run `./scripts/create-sandbox-checkout.ps1`. It creates a R$10 gift/contribution through the local API and stores reusable request keys and the checkout link in ignored `.local/sandbox-checkout.json`. Rerunning reuses that contribution. Complete checkout with an official test card, then verify the authoritative order and signed webhook processing before considering the test successful.
 

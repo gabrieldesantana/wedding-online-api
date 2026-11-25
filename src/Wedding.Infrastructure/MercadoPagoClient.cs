@@ -23,7 +23,7 @@ public sealed class MercadoPagoClient(HttpClient http, IOptions<MercadoPagoOptio
         if (json is not null) request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         try
         {
-            if (method == HttpMethod.Post && settings.Value.SandboxSingleAttempt)
+            if (method == HttpMethod.Post && (settings.Value.Environment == "test" || settings.Value.SandboxSingleAttempt))
             {
                 using var identityRequest = new HttpRequestMessage(HttpMethod.Get, "users/me");
                 identityRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.Value.AccessToken);
@@ -60,7 +60,10 @@ public sealed class MercadoPagoClient(HttpClient http, IOptions<MercadoPagoOptio
                 accountLiveMode = !account.RootElement.GetProperty("tags").EnumerateArray().Any(x => x.GetString() == "test_user");
             }
             var order = Parse(root, accountLiveMode);
-            if (order.NetAmountCents is null && root.TryGetProperty("transactions", out var transactions) && transactions.TryGetProperty("payments", out var payments))
+            // Sandbox legacy Payments projections may report live_mode=true and a merchant-order ID.
+            // Do not consume those incompatible projections. Orders + verified test-account metadata
+            // remain authoritative; unavailable sandbox fees/net amounts stay unknown.
+            if (order.LiveMode && order.NetAmountCents is null && root.TryGetProperty("transactions", out var transactions) && transactions.TryGetProperty("payments", out var payments))
             {
                 long net = 0, fees = 0; var known = false; var complete = true;
                 foreach (var payment in payments.EnumerateArray())

@@ -27,19 +27,25 @@ public static class WebhookSignature
         catch (FormatException) { return false; }
     }
 }
-public sealed class WebhookService(WeddingDbContext db, IOptions<MercadoPagoOptions> settings)
+public sealed class WebhookService(WeddingDbContext db, IOptions<MercadoPagoOptions> settings, ILogger<WebhookService> logger)
 {
     public async Task ReceiveAsync(string body, string? signature, string? requestId, string? resourceId, CancellationToken ct)
     {
         if (!WebhookSignature.Verify(signature, requestId, resourceId, settings.Value.WebhookSecret))
+        {
+            logger.LogWarning("Webhook rejected: invalid_signature");
             throw new ApiException(401, "invalid_signature", "Notificação não autenticada.");
+        }
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String || !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object || !data.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String || id.GetString() != resourceId ||
             !root.TryGetProperty("application_id", out var app) || app.ToString() != settings.Value.ApplicationId ||
             !root.TryGetProperty("user_id", out var receiver) || receiver.ToString() != settings.Value.ReceiverId ||
             !root.TryGetProperty("live_mode", out var live) || live.ValueKind is not (JsonValueKind.True or JsonValueKind.False) || live.GetBoolean() != (settings.Value.Environment == "production"))
+        {
+            logger.LogWarning("Webhook rejected: invalid_metadata");
             throw new ApiException(400, "invalid_webhook", "Notificação inválida.");
+        }
         var topic = type.GetString();
         if (string.IsNullOrEmpty(topic) || topic.Length > 80 || resourceId!.Length > 200) throw new ApiException(400, "invalid_webhook", "Notificação inválida.");
         var eventKey = root.TryGetProperty("id", out var eventId) && !string.IsNullOrWhiteSpace(eventId.ToString())

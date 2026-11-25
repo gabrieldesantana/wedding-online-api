@@ -56,8 +56,8 @@ builder.Services.AddDbContext<WeddingDbContext>(o => o.UseNpgsql(databaseConnect
 builder.Services.AddOptions<MercadoPagoOptions>().BindConfiguration("MercadoPago").ValidateDataAnnotations()
     .Validate(o => o.Environment is "test" or "production", "MercadoPago environment must be test or production.")
     .Validate(o => Rules.HttpsUrl(o.NotificationUrl), "Notification URL must use HTTPS.")
-    .Validate(o => !o.SandboxSingleAttempt || ((builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")) && o.Environment == "test"), "Single-attempt sandbox mode is only available in Development/Testing with test credentials.")
-    .Validate(o => !o.CheckoutEnabled || ((o.IdempotencyWindowMinutes > 0 || o.SandboxSingleAttempt) && ValidatedConfig.IsValid(o.ValidatedConfigJson)), "Checkout requires validated configuration and verified retention, or development-only single-attempt sandbox mode.")
+    .Validate(o => !o.SandboxSingleAttempt || o.Environment == "test", "Single-attempt sandbox mode requires the test payment environment.")
+    .Validate(o => !o.CheckoutEnabled || ((o.IdempotencyWindowMinutes > 0 || o.SandboxSingleAttempt) && ValidatedConfig.IsValid(o.ValidatedConfigJson)), "Checkout requires validated configuration and verified retention, or single-attempt sandbox mode.")
     .ValidateOnStart();
 builder.Services.AddOptions<FrontendOptions>().BindConfiguration("Frontend").ValidateDataAnnotations()
     .Validate(o => Uri.TryCreate(o.PublicOrigin, UriKind.Absolute, out var u) && string.IsNullOrEmpty(u.UserInfo) && u.AbsolutePath == "/" && string.IsNullOrEmpty(u.Query) && string.IsNullOrEmpty(u.Fragment) &&

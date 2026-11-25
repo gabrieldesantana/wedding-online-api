@@ -12,7 +12,7 @@ public sealed class MercadoPagoOptions
     [Required] public string NotificationUrl { get; set; } = "";
     // Must only be enabled after the account's Orders capabilities and payload have passed sandbox acceptance.
     public bool CheckoutEnabled { get; set; }
-    // Development/test only: send once, never automatically repeat an uncertain creation without a verified retention window.
+    // Test payment accounts only, independent of hosting environment. Never repeat uncertain creation.
     public bool SandboxSingleAttempt { get; set; }
     public int IdempotencyWindowMinutes { get; set; }
     public string ValidatedConfigJson { get; set; } = "";
