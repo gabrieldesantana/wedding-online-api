@@ -76,20 +76,31 @@ public sealed class MercadoPagoClient(HttpClient http, IOptions<MercadoPagoOptio
                 long net = 0, fees = 0; var known = false; var complete = true;
                 foreach (var payment in payments.EnumerateArray())
                 {
-                    if (!payment.TryGetProperty("reference_id", out var reference) || !long.TryParse(reference.ToString(), out _)) { complete = false; continue; }
+                    var hasReference = payment.TryGetProperty("reference_id", out var reference);
+                    if (!hasReference && payment.TryGetProperty("reference", out var nestedReference) && nestedReference.ValueKind == JsonValueKind.Object)
+                        hasReference = nestedReference.TryGetProperty("id", out reference);
+                    if (!hasReference || !long.TryParse(reference.ToString(), out _)) { complete = false; continue; }
                     using var paymentRequest = new HttpRequestMessage(HttpMethod.Get, "v1/payments/" + Uri.EscapeDataString(reference.ToString()));
                     paymentRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.Value.AccessToken);
                     using var paymentResponse = await http.SendAsync(paymentRequest, ct);
                     if (!paymentResponse.IsSuccessStatusCode) { complete = false; continue; }
                     using var paymentDocument = JsonDocument.Parse(await paymentResponse.Content.ReadAsStringAsync(ct));
                     var financial = paymentDocument.RootElement;
-                    if (financial.GetProperty("collector_id").ToString() != order.ReceiverId || financial.GetProperty("live_mode").GetBoolean() != order.LiveMode || financial.GetProperty("currency_id").GetString() != "BRL" ||
-                        !financial.TryGetProperty("order", out var relation) || relation.GetProperty("id").ToString() != order.Id)
+                    // Payments.order.id is a legacy merchant-order identifier, not the ORD... ID.
+                    // Bind the exact payment reference from the authoritative order instead, and
+                    // independently verify its owner, environment, reference, currency and amount.
+                    if (financial.GetProperty("id").ToString() != reference.ToString() ||
+                        financial.GetProperty("collector_id").ToString() != order.ReceiverId ||
+                        financial.GetProperty("live_mode").GetBoolean() != order.LiveMode ||
+                        financial.GetProperty("currency_id").GetString() != order.Currency ||
+                        !financial.TryGetProperty("external_reference", out var externalReference) || externalReference.ToString() != order.Reference ||
+                        ReadMoney(financial.GetProperty("transaction_amount")) != ReadMoney(payment.GetProperty("amount")))
                         throw new ApiException(502, "financial_mismatch", "Resposta financeira incompatível.");
                     if (financial.TryGetProperty("transaction_details", out var details) && details.TryGetProperty("net_received_amount", out var received))
-                    { net = checked(net + Rules.Cents(received.GetDecimal())); known = true; }
+                    { net = checked(net + ReadMoney(received)); known = true; }
                     else complete = false;
-                    if (financial.TryGetProperty("fee_details", out var feeDetails)) foreach (var fee in feeDetails.EnumerateArray()) fees = checked(fees + Rules.Cents(fee.GetProperty("amount").GetDecimal()));
+                    if (financial.TryGetProperty("fee_details", out var feeDetails)) foreach (var fee in feeDetails.EnumerateArray()) fees = checked(fees + ReadMoney(fee.GetProperty("amount")));
+                    else complete = false;
                 }
                 if (known && complete) order = order with { NetAmountCents = net, FeeAmountCents = fees };
             }
@@ -112,6 +123,7 @@ public sealed class MercadoPagoClient(HttpClient http, IOptions<MercadoPagoOptio
             throw new ApiException(502, "invalid_provider_response", "Resposta inválida do provedor.");
         }
     }
+    private static long ReadMoney(JsonElement value) => Rules.Cents(decimal.Parse(value.ToString(), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture));
     public static ProviderOrder Parse(JsonElement root, bool? verifiedAccountLiveMode = null)
     {
         static string Required(JsonElement item, string key) => item.GetProperty(key).ToString();

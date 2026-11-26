@@ -12,6 +12,45 @@ namespace Wedding.UnitTests;
 public sealed class ProviderTests
 {
     [Theory]
+    [InlineData(null, false)]
+    [InlineData(null, true)]
+    [InlineData("id", false)]
+    [InlineData("collector_id", false)]
+    [InlineData("live_mode", false)]
+    [InlineData("currency_id", false)]
+    [InlineData("external_reference", false)]
+    [InlineData("transaction_amount", false)]
+    public async Task LiveFinancialDetailsUseExactLinkedPaymentRatherThanMerchantOrderId(string? tamperedField, bool nestedReference)
+    {
+        var node = JsonNode.Parse(Fixture("order-sandbox-created.json"))!;
+        node["id"] = "ORD_LIVE_FIXTURE"; node["live_mode"] = true;
+        node["status"] = "processed"; node["status_detail"] = "accredited"; node["total_paid_amount"] = "10.00";
+        node["transactions"] = JsonNode.Parse(nestedReference
+            ? "{\"payments\":[{\"reference\":{\"id\":\"123456\"},\"amount\":\"10.00\"}]}"
+            : "{\"payments\":[{\"reference_id\":\"123456\",\"amount\":\"10.00\"}]}");
+        var financial = JsonNode.Parse("""
+            {"id":123456,"collector_id":"receiver","live_mode":true,"currency_id":"BRL",
+             "external_reference":"00000000-0000-0000-0000-000000000001","transaction_amount":"10.00",
+             "order":{"id":"987654","type":"mercadopago"},
+             "transaction_details":{"net_received_amount":"9.50"},"fee_details":[{"amount":"0.50"}]}
+            """)!;
+        if (tamperedField == "live_mode") financial[tamperedField] = false;
+        else if (tamperedField == "transaction_amount") financial[tamperedField] = "1.00";
+        else if (tamperedField is not null) financial[tamperedField] = "wrong";
+        var handler = new StubHandler(request => new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent(request.RequestUri!.AbsolutePath == "/v1/payments/123456" ? financial.ToJsonString() : node.ToJsonString()) });
+        var client = new MercadoPagoClient(new HttpClient(handler) { BaseAddress = new Uri("https://api.mercadopago.com/") },
+            Options.Create(new MercadoPagoOptions { Environment = "production" }), NullLogger<MercadoPagoClient>.Instance);
+        if (tamperedField is not null)
+            Assert.Equal("financial_mismatch", (await Assert.ThrowsAsync<ApiException>(() => client.GetOrderAsync("ORD_LIVE_FIXTURE", CancellationToken.None))).Code);
+        else
+        {
+            var order = await client.GetOrderAsync("ORD_LIVE_FIXTURE", CancellationToken.None);
+            Assert.Equal(950, order.NetAmountCents); Assert.Equal(50, order.FeeAmountCents);
+            Assert.Equal("approved", Rules.MapStatus(order.Status, order.StatusDetail, order.RefundedAmountCents));
+        }
+    }
+    [Theory]
     [InlineData("receiver", true, "production_account_required")]
     [InlineData("wrong-receiver", false, "receiver_mismatch")]
     public async Task ProductionRejectsIncompatibleCredentialsBeforePosting(string receiver, bool testAccount, string expected)
