@@ -11,6 +11,16 @@ namespace Wedding.UnitTests;
 
 public sealed class RulesTests
 {
+    [Theory]
+    [InlineData(null, "request", "order", "missing_signature")]
+    [InlineData("ts=1,v1=bad", null, "order", "missing_request_id")]
+    [InlineData("ts=1,v1=bad", "request", null, "missing_data_id_query")]
+    [InlineData("ts=1,v1=bad", "request", "order", "malformed_signature")]
+    public void SignatureDiagnosticsDoNotExposeIncomingValues(string? signature, string? request, string? id, string expected)
+        => Assert.Equal(expected, WebhookSignature.FailureReason(signature, request, id, "fixture-only-secret"));
+
+    [Fact] public void WrongHmacHasDistinctDiagnostic()
+        => Assert.Equal("hmac_mismatch", WebhookSignature.FailureReason("ts=1,v1=" + new string('0', 64), "request", "order", "fixture-only-secret"));
     [Fact] public void NormalizedPayloadsHaveIdenticalFingerprints()
     {
         var id = Guid.NewGuid();

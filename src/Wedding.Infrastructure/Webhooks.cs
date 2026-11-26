@@ -12,28 +12,34 @@ public static class WebhookSignature
 {
     // Matches Mercado Pago's official .NET validator: data.id is preserved exactly, not lowercased.
     public static bool Verify(string? signature, string? requestId, string? dataId, string secret)
+        => FailureReason(signature, requestId, dataId, secret) is null;
+
+    public static string? FailureReason(string? signature, string? requestId, string? dataId, string secret)
     {
-        if (string.IsNullOrWhiteSpace(signature) || string.IsNullOrWhiteSpace(requestId) || string.IsNullOrWhiteSpace(dataId)) return false;
+        if (string.IsNullOrWhiteSpace(signature)) return "missing_signature";
+        if (string.IsNullOrWhiteSpace(requestId)) return "missing_request_id";
+        if (string.IsNullOrWhiteSpace(dataId)) return "missing_data_id_query";
         var parts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var part in signature.Split(','))
         {
             var pair = part.Split('=', 2, StringSplitOptions.TrimEntries);
-            if (pair.Length != 2 || !parts.TryAdd(pair[0], pair[1])) return false;
+            if (pair.Length != 2 || !parts.TryAdd(pair[0], pair[1])) return "malformed_signature";
         }
-        if (!parts.TryGetValue("ts", out var timestamp) || !long.TryParse(timestamp, out _) || !parts.TryGetValue("v1", out var hash) || hash.Length != 64) return false;
+        if (!parts.TryGetValue("ts", out var timestamp) || !long.TryParse(timestamp, out _) || !parts.TryGetValue("v1", out var hash) || hash.Length != 64) return "malformed_signature";
         var manifest = $"id:{dataId.Trim()};request-id:{requestId.Trim()};ts:{timestamp};";
         var computed = HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(manifest));
-        try { return CryptographicOperations.FixedTimeEquals(computed, Convert.FromHexString(hash)); }
-        catch (FormatException) { return false; }
+        try { return CryptographicOperations.FixedTimeEquals(computed, Convert.FromHexString(hash)) ? null : "hmac_mismatch"; }
+        catch (FormatException) { return "malformed_signature"; }
     }
 }
 public sealed class WebhookService(WeddingDbContext db, IOptions<MercadoPagoOptions> settings, ILogger<WebhookService> logger)
 {
     public async Task ReceiveAsync(string body, string? signature, string? requestId, string? resourceId, CancellationToken ct)
     {
-        if (!WebhookSignature.Verify(signature, requestId, resourceId, settings.Value.WebhookSecret))
+        var signatureFailure = WebhookSignature.FailureReason(signature, requestId, resourceId, settings.Value.WebhookSecret);
+        if (signatureFailure is not null)
         {
-            logger.LogWarning("Webhook rejected: invalid_signature");
+            logger.LogWarning("Webhook rejected: invalid_signature; reason {Reason}", signatureFailure);
             throw new ApiException(401, "invalid_signature", "Notificação não autenticada.");
         }
         using var document = JsonDocument.Parse(body);
