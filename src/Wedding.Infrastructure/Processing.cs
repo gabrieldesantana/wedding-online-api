@@ -33,6 +33,7 @@ public sealed class DurableProcessor(WeddingDbContext db, IMercadoPagoClient pro
             await db.WebhookInbox.Where(x => x.Id == item.Id && x.LeaseOwner == owner).ExecuteUpdateAsync(s => s
                 .SetProperty(x => x.ProcessedAt, DateTimeOffset.UtcNow).SetProperty(x => x.LeaseUntil, (DateTimeOffset?)null)
                 .SetProperty(x => x.LeaseOwner, (Guid?)null).SetProperty(x => x.LastErrorCode, item.Topic == "order" ? null : "unsupported_topic"), ct);
+            logger.LogInformation("Webhook inbox {InboxId} processed for order {ProviderOrderId}", item.Id, item.ProviderResourceId);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -119,9 +120,8 @@ public sealed class InboxWorker(IServiceScopeFactory scopes, IOptions<Processing
         {
             try
             {
+                await ProcessCycleAsync(stoppingToken);
                 await using var scope = scopes.CreateAsyncScope();
-                var processor = scope.ServiceProvider.GetRequiredService<DurableProcessor>();
-                for (var i = 0; i < 100 && await processor.ProcessInboxAsync(stoppingToken); i++) { }
                 var db = scope.ServiceProvider.GetRequiredService<WeddingDbContext>();
                 var outstanding = db.WebhookInbox.Where(x => x.ProcessedAt == null);
                 var oldest = await outstanding.Select(x => (DateTimeOffset?)x.ReceivedAt).MinAsync(stoppingToken);
@@ -134,5 +134,14 @@ public sealed class InboxWorker(IServiceScopeFactory scopes, IOptions<Processing
             catch { logger.LogError("Inbox processing unavailable; retrying after polling interval"); }
             await Task.Delay(TimeSpan.FromSeconds(options.Value.PollSeconds), stoppingToken);
         }
+    }
+    public async Task ProcessCycleAsync(CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var processor = scope.ServiceProvider.GetRequiredService<DurableProcessor>();
+        for (var i = 0; i < 100 && await processor.ProcessInboxAsync(ct); i++) { }
+        // Reconciliation is also required when no webhook arrives. NextSyncAt keeps
+        // provider reads five minutes apart; durable leases coordinate with cron.
+        for (var i = 0; i < 5 && await processor.ProcessAttemptAsync(null, null, null, ct); i++) { }
     }
 }

@@ -112,6 +112,10 @@ With local credentials, webhook configuration, and this sandbox mode configured,
 
 ## Jobs and recovery
 
+The web worker drains authenticated inbox items and reconciles up to five due payment attempts per polling cycle. Each successful provider synchronization schedules the next read five minutes later, including across process restarts. Missing webhook deliveries therefore no longer require manual intervention while the web process is running. Render Free may sleep; keep the five-minute external reconciliation schedule for recovery independent of web uptime. The same leases coordinate web and cron workers, and uncertain sandbox creations are never automatically recreated.
+
+Webhook lifecycle logs identify accepted inbox IDs and successfully processed provider order IDs without recording signatures, request bodies, tracking tokens, or guest information. A missing inbox record means there is no accepted delivery; use Mercado Pago's delivery history and HTTP response to distinguish no delivery from pre-inbox rejection. Do not diagnose missing delivery solely from a pending contribution.
+
 Run commands from an authorized Render shell or a secure terminal using the deployed image and secrets:
 
 ```sh

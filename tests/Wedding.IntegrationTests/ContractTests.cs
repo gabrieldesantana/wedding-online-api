@@ -15,6 +15,33 @@ namespace Wedding.IntegrationTests;
 [Collection("API")]
 public sealed class ContractTests(ApiFixture fixture)
 {
+    [Fact] public async Task WebWorkerReconcilesApprovedOrderWithoutAWebhookAndSurvivesRestart()
+    {
+        var (client, csrf, receipt) = await ContributionAsync(); using (client)
+        {
+            await Post(client, $"/api/contributions/{receipt.Id}/checkout", new { }, csrf, Guid.NewGuid().ToString(), receipt.TrackingToken);
+            await using var scope = fixture.Factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<WeddingDbContext>();
+            var attempt = await db.PaymentAttempts.AsNoTracking().SingleAsync(x => x.ContributionId == receipt.Id);
+            var order = fixture.Factory.Provider.Orders[attempt.ProviderIdempotencyKey];
+            fixture.Factory.Provider.Orders[attempt.ProviderIdempotencyKey] = order with
+            { Status = "processed", StatusDetail = "accredited", UpdatedAt = order.UpdatedAt.AddMinutes(1) };
+            await db.PaymentAttempts.Where(x => x.Id == attempt.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.NextSyncAt, DateTimeOffset.UtcNow.AddDays(-1)));
+            var worker = new InboxWorker(fixture.Factory.Services.GetRequiredService<IServiceScopeFactory>(),
+                Microsoft.Extensions.Options.Options.Create(new ProcessingOptions()),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<InboxWorker>.Instance);
+            await worker.ProcessCycleAsync(CancellationToken.None);
+            Assert.Equal("approved", (await db.Contributions.AsNoTracking().SingleAsync(x => x.Id == receipt.Id)).Status);
+            Assert.False(await db.WebhookInbox.AnyAsync(x => x.ProviderResourceId == order.Id));
+            var reads = fixture.Factory.Provider.Reads.GetValueOrDefault(order.Id);
+            var restarted = new InboxWorker(fixture.Factory.Services.GetRequiredService<IServiceScopeFactory>(),
+                Microsoft.Extensions.Options.Options.Create(new ProcessingOptions()),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<InboxWorker>.Instance);
+            await restarted.ProcessCycleAsync(CancellationToken.None);
+            Assert.Equal(reads, fixture.Factory.Provider.Reads.GetValueOrDefault(order.Id));
+            Assert.Equal(1, fixture.Factory.Provider.Calls[attempt.ProviderIdempotencyKey]);
+        }
+    }
     [Fact] public async Task SingleAttemptSandboxWorksWithoutRetentionAndNeverRetriesUncertainty()
     {
         await using var factory = new ApiFactory(fixture.Factory.ConnectionString) { SingleAttemptSandbox = true };

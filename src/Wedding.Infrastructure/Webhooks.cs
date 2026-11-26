@@ -38,21 +38,30 @@ public sealed class WebhookService(WeddingDbContext db, IOptions<MercadoPagoOpti
         }
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String || !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object || !data.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String || id.GetString() != resourceId ||
-            !root.TryGetProperty("application_id", out var app) || app.ToString() != settings.Value.ApplicationId ||
-            !root.TryGetProperty("user_id", out var receiver) || receiver.ToString() != settings.Value.ReceiverId ||
-            !root.TryGetProperty("live_mode", out var live) || live.ValueKind is not (JsonValueKind.True or JsonValueKind.False) || live.GetBoolean() != (settings.Value.Environment == "production"))
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String || !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object || !data.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String || id.GetString() != resourceId)
         {
-            logger.LogWarning("Webhook rejected: invalid_metadata");
-            throw new ApiException(400, "invalid_webhook", "Notificação inválida.");
+            throw Reject("invalid_shape_or_resource");
         }
+        if (!root.TryGetProperty("application_id", out var app) || app.ToString() != settings.Value.ApplicationId) throw Reject("application_mismatch");
+        if (!root.TryGetProperty("user_id", out var receiver) || receiver.ToString() != settings.Value.ReceiverId) throw Reject("receiver_mismatch");
+        if (!root.TryGetProperty("live_mode", out var live) || live.ValueKind is not (JsonValueKind.True or JsonValueKind.False) || live.GetBoolean() != (settings.Value.Environment == "production")) throw Reject("environment_mismatch");
         var topic = type.GetString();
         if (string.IsNullOrEmpty(topic) || topic.Length > 80 || resourceId!.Length > 200) throw new ApiException(400, "invalid_webhook", "Notificação inválida.");
         var eventKey = root.TryGetProperty("id", out var eventId) && !string.IsNullOrWhiteSpace(eventId.ToString())
             ? "id:" + eventId.ToString() : "hash:" + Rules.Hash(signature + "|" + requestId + "|" + resourceId + "|" + body);
         var scopedKey = Rules.Hash(settings.Value.ApplicationId + ":" + settings.Value.Environment + ":" + topic + ":" + eventKey);
-        db.WebhookInbox.Add(new WebhookInbox { ProviderEventId = scopedKey, Topic = topic, ProviderResourceId = resourceId });
-        try { await db.SaveChangesAsync(ct); }
+        var item = new WebhookInbox { ProviderEventId = scopedKey, Topic = topic, ProviderResourceId = resourceId };
+        db.WebhookInbox.Add(item);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Webhook accepted into inbox {InboxId} for order {ProviderOrderId}", item.Id, resourceId);
+        }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation }) { db.ChangeTracker.Clear(); }
+    }
+    private ApiException Reject(string reason)
+    {
+        logger.LogWarning("Webhook rejected: {Reason}", reason);
+        return new ApiException(400, "invalid_webhook", "Notificação inválida.");
     }
 }
