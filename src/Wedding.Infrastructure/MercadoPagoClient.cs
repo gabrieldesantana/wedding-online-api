@@ -23,16 +23,24 @@ public sealed class MercadoPagoClient(HttpClient http, IOptions<MercadoPagoOptio
         if (json is not null) request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         try
         {
-            if (method == HttpMethod.Post && (settings.Value.Environment == "test" || settings.Value.SandboxSingleAttempt))
+            if (method == HttpMethod.Post)
             {
                 using var identityRequest = new HttpRequestMessage(HttpMethod.Get, "users/me");
                 identityRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.Value.AccessToken);
                 using var identityResponse = await http.SendAsync(identityRequest, ct);
-                if (!identityResponse.IsSuccessStatusCode) throw new ApiException(502, "sandbox_account_unverified", "Conta de teste não verificada.");
+                if (!identityResponse.IsSuccessStatusCode) throw new ApiException(502, "account_unverified", "Conta do provedor não verificada.");
                 using var identity = JsonDocument.Parse(await identityResponse.Content.ReadAsStringAsync(ct));
-                if (identity.RootElement.GetProperty("id").ToString() != settings.Value.ReceiverId ||
-                    !identity.RootElement.GetProperty("tags").EnumerateArray().Any(x => x.GetString() == "test_user"))
-                    throw new ApiException(502, "sandbox_account_required", "Esta operação exige uma conta de teste verificada.");
+                var isTestAccount = identity.RootElement.GetProperty("tags").EnumerateArray().Any(x => x.GetString() == "test_user");
+                if (identity.RootElement.GetProperty("id").ToString() != settings.Value.ReceiverId)
+                {
+                    logger.LogError("Provider creation blocked: receiver_mismatch");
+                    throw new ApiException(502, "receiver_mismatch", "Conta recebedora incompatível.");
+                }
+                if (isTestAccount != (settings.Value.Environment == "test"))
+                {
+                    logger.LogError("Provider creation blocked: environment_mismatch");
+                    throw new ApiException(502, isTestAccount ? "production_account_required" : "sandbox_account_required", "Ambiente da conta do provedor incompatível.");
+                }
             }
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
             if (!response.IsSuccessStatusCode)

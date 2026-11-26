@@ -14,8 +14,12 @@ public sealed class FinancialSync(WeddingDbContext db, IOptions<MercadoPagoOptio
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var contribution = await db.Contributions.FromSqlInterpolated($"SELECT * FROM \"Contributions\" WHERE \"Id\" = {link.ContributionId} FOR UPDATE").SingleAsync(ct);
         var attempt = await db.PaymentAttempts.SingleAsync(x => x.Id == attemptId, ct);
-        if (order.ApplicationId != settings.Value.ApplicationId || order.ReceiverId != settings.Value.ReceiverId || order.LiveMode != (settings.Value.Environment == "production") || order.Currency != "BRL" || order.AmountCents != contribution.AmountCentsSnapshot || (attempt.ProviderOrderId is not null && attempt.ProviderOrderId != order.Id))
-            throw Mismatch("financial_identity");
+        if (order.ApplicationId != settings.Value.ApplicationId) throw Mismatch("application_mismatch", order.Id);
+        if (order.ReceiverId != settings.Value.ReceiverId) throw Mismatch("receiver_mismatch", order.Id);
+        if (order.LiveMode != (settings.Value.Environment == "production")) throw Mismatch("environment_mismatch", order.Id);
+        if (order.Currency != "BRL") throw Mismatch("currency_mismatch", order.Id);
+        if (order.AmountCents != contribution.AmountCentsSnapshot) throw Mismatch("amount_mismatch", order.Id);
+        if (attempt.ProviderOrderId is not null && attempt.ProviderOrderId != order.Id) throw Mismatch("order_mismatch", order.Id);
         var previous = attempt.ProviderUpdatedAt;
         if (previous is not null && order.UpdatedAt < previous) return;
         attempt.ProviderOrderId = order.Id;
@@ -46,9 +50,9 @@ public sealed class FinancialSync(WeddingDbContext db, IOptions<MercadoPagoOptio
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
     }
-    private ApiException Mismatch(string code)
+    private ApiException Mismatch(string code, string? providerOrderId = null)
     {
-        logger.LogError("Authoritative payment verification failed: {Code}", code);
+        logger.LogError("Authoritative payment verification failed: {Code}; provider order {ProviderOrderId}", code, providerOrderId);
         OperationalMetrics.Mismatches.Add(1);
         return new ApiException(502, "financial_mismatch", "Resposta financeira incompatível.");
     }

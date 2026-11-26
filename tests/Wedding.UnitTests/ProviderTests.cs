@@ -11,6 +11,22 @@ namespace Wedding.UnitTests;
 
 public sealed class ProviderTests
 {
+    [Theory]
+    [InlineData("receiver", true, "production_account_required")]
+    [InlineData("wrong-receiver", false, "receiver_mismatch")]
+    public async Task ProductionRejectsIncompatibleCredentialsBeforePosting(string receiver, bool testAccount, string expected)
+    {
+        var posts = 0;
+        var handler = new StubHandler(request =>
+        {
+            if (request.Method == HttpMethod.Post) posts++;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new { id = receiver, tags = testAccount ? new[] { "test_user" } : new[] { "normal" } })) };
+        });
+        var client = new MercadoPagoClient(new HttpClient(handler) { BaseAddress = new Uri("https://api.mercadopago.com/") },
+            Options.Create(new MercadoPagoOptions { Environment = "production", ReceiverId = "receiver" }), NullLogger<MercadoPagoClient>.Instance);
+        var error = await Assert.ThrowsAsync<ApiException>(() => client.CreateOrderAsync("{}", Guid.NewGuid(), CancellationToken.None));
+        Assert.Equal(expected, error.Code); Assert.Equal(0, posts);
+    }
     [Fact] public async Task SandboxApprovalUsesOrdersWithoutLegacyFinancialProjection()
     {
         var node = JsonNode.Parse(Fixture("order-sandbox-created.json"))!;
@@ -81,10 +97,12 @@ public sealed class ProviderTests
         var key = Guid.NewGuid();
         var handler = new StubHandler(request =>
         {
+            if (request.RequestUri!.AbsolutePath == "/users/me")
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"id\":\"receiver\",\"tags\":[\"normal\"]}") };
             Assert.Equal(key.ToString(), request.Headers.GetValues("X-Idempotency-Key").Single()); Assert.Equal("Bearer", request.Headers.Authorization!.Scheme);
             return new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("provider-private-error-with-guest-data") };
         });
-        var client = new MercadoPagoClient(new HttpClient(handler) { BaseAddress = new Uri("https://api.mercadopago.com/") }, Options.Create(new MercadoPagoOptions { AccessToken = "test-only", Environment = "production" }), NullLogger<MercadoPagoClient>.Instance);
+        var client = new MercadoPagoClient(new HttpClient(handler) { BaseAddress = new Uri("https://api.mercadopago.com/") }, Options.Create(new MercadoPagoOptions { AccessToken = "test-only", Environment = "production", ReceiverId = "receiver" }), NullLogger<MercadoPagoClient>.Instance);
         var error = await Assert.ThrowsAsync<ApiException>(() => client.CreateOrderAsync("{}", key, CancellationToken.None));
         Assert.Equal("provider_creation_failed", error.Code); Assert.DoesNotContain("guest", error.Message);
     }
