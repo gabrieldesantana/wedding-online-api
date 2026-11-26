@@ -10,7 +10,8 @@ namespace Wedding.Infrastructure;
 
 public static class WebhookSignature
 {
-    // Matches Mercado Pago's official .NET validator: data.id is preserved exactly, not lowercased.
+    // The .NET SDK preserves case; some Mercado Pago notification flows use lowercase IDs.
+    // Authenticate either canonical manifest, never an unsigned body or client payment status.
     public static bool Verify(string? signature, string? requestId, string? dataId, string secret)
         => FailureReason(signature, requestId, dataId, secret) is null;
 
@@ -28,7 +29,15 @@ public static class WebhookSignature
         if (!parts.TryGetValue("ts", out var timestamp) || !long.TryParse(timestamp, out _) || !parts.TryGetValue("v1", out var hash) || hash.Length != 64) return "malformed_signature";
         var manifest = $"id:{dataId.Trim()};request-id:{requestId.Trim()};ts:{timestamp};";
         var computed = HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(manifest));
-        try { return CryptographicOperations.FixedTimeEquals(computed, Convert.FromHexString(hash)) ? null : "hmac_mismatch"; }
+        try
+        {
+            var received = Convert.FromHexString(hash);
+            var exact = CryptographicOperations.FixedTimeEquals(computed, received);
+            var canonicalManifest = $"id:{dataId.Trim().ToLowerInvariant()};request-id:{requestId.Trim()};ts:{timestamp};";
+            var canonical = HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(canonicalManifest));
+            var lower = CryptographicOperations.FixedTimeEquals(canonical, received);
+            return exact | lower ? null : "hmac_mismatch";
+        }
         catch (FormatException) { return "malformed_signature"; }
     }
 }

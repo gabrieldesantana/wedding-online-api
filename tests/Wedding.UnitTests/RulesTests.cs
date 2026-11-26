@@ -62,6 +62,16 @@ public sealed class RulesTests
         Assert.False(WebhookSignature.Verify(signature, "changed", id, secret));
         Assert.False(WebhookSignature.Verify(signature, request, id, "wrong"));
     }
+    [Fact] public void LowercaseCanonicalSignatureAuthenticatesUppercaseOrderButRejectsTampering()
+    {
+        const string secret = "fixture-only-secret", id = "ORDTST01M8ATW1RBF4H0X6NVWERDG7J3", request = "fixture-request", ts = "1742505638683";
+        var hash = Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes($"id:{id.ToLowerInvariant()};request-id:{request};ts:{ts};")));
+        var signature = $"ts={ts},v1={hash}";
+        Assert.True(WebhookSignature.Verify(signature, request, id, secret));
+        Assert.False(WebhookSignature.Verify(signature, request, id + "0", secret));
+        Assert.False(WebhookSignature.Verify(signature, "different-request", id, secret));
+        Assert.False(WebhookSignature.Verify(signature, request, id, "wrong-secret"));
+    }
     [Theory] [InlineData("")] [InlineData("ts=bad,v1=bad")] [InlineData("ts=1,ts=2,v1=0000")]
     public void MalformedSignatureIsRejected(string signature) => Assert.False(WebhookSignature.Verify(signature, "req", "id", "secret"));
     [Fact] public void CheckoutConfigurationRequiresBoletoExclusionAndNoSubsidy()

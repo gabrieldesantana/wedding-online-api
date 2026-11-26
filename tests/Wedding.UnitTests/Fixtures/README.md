@@ -8,7 +8,7 @@ Sources checked 2026-11-22:
 - https://www.mercadopago.com.br/developers/en/reference/online-payments/checkout-pro/get-order/get
 - https://raw.githubusercontent.com/mercadopago/sdk-dotnet/master/src/MercadoPago/Webhook/WebhookSignatureValidator.cs
 
-Signature test vectors use the official SDK manifest (`id:...;request-id:...;ts:...;`) and synthetic secrets. They are reproducible test vectors, not claims of captured provider traffic. Signed IDs retain their case. No short timestamp tolerance is imposed because delivery retries can be delayed; durable deduplication prevents replay processing.
+Signature test vectors use the official SDK manifest (`id:...;request-id:...;ts:...;`) and synthetic secrets. They are reproducible test vectors, not claims of captured provider traffic. Synthetic vectors cover exact-case SDK manifests and lowercase-ID manifests, including tampered resources, request IDs, and incorrect secrets. These do not prove which form a real delivery used. No short timestamp tolerance is imposed because delivery retries can be delayed; durable deduplication prevents replay processing.
 
 `order-sandbox-created.json` captures selected fields from an authenticated sandbox Orders GET on 2026-11-24 UTC after a successful R$10 create request. Order, receiver, application, and external reference identifiers are replaced. Payer data, checkout URLs, and private return tokens are excluded. Account metadata independently verified the test environment. This fixture validates creation parsing; it does not demonstrate an approved payment.
 
